@@ -45,19 +45,19 @@ def scene():
             angle = j / count * TAU + rng.uniform(-0.012, 0.012)
             rr = r * rng.uniform(0.9, 1.035)
             v = rng.random()
-            color = (int(28 + v * 53), int(82 + v * 70), int(56 + v * 51))
-            add(rr * math.cos(angle), y + rng.uniform(-0.014, 0.014), rr * math.sin(angle), rng.choice(".,:;+=x*"), color, 0.12)
+            color = (int(42 + v * 62), int(142 + v * 95), int(82 + v * 77))
+            add(rr * math.cos(angle), y + rng.uniform(-0.014, 0.014), rr * math.sin(angle), rng.choice(".,:;+=x*"), color, 0.25)
         # A scattering of frosty branch tips.
         for j in range(max(1, count // 22)):
             a = rng.random() * TAU
-            add(r * 1.045 * math.cos(a), y, r * 1.045 * math.sin(a), rng.choice("+*x"), (155, 202, 184), 0.55)
+            add(r * 1.045 * math.cos(a), y, r * 1.045 * math.sin(a), rng.choice("+*x"), (207, 255, 231), 0.75)
 
     # A warm gold beaded garland winds six times around the tree.
     for i in range(1500):
         y = 0.22 + i / 1499 * 5.55
         a = y / 5.55 * TAU * 6
         r = radius(y) + 0.045
-        add(r * math.cos(a), y, r * math.sin(a), rng.choice("o.:*"), (220, 182, 79), 0.25)
+        add(r * math.cos(a), y, r * math.sin(a), rng.choice("o.:*"), (255, 222, 110), 0.55)
 
     # Round red and gold ornaments, modeled as small spheres.
     for i in range(25):
@@ -72,9 +72,12 @@ def scene():
             for lon in range(14):
                 theta = lon / 14 * TAU
                 dx, dy, dz = size * math.sin(phi) * math.cos(theta), size * math.cos(phi), size * math.sin(phi) * math.sin(theta)
-                lit = 0.62 + 0.38 * max(0, (-dx + dy + dz) / (size * 1.73))
-                base = (248, 60, 70) if red else (248, 198, 87)
-                add(cx + dx, y + dy, cz + dz, rng.choice("oO@*"), tuple(int(c * lit) for c in base), 0.08)
+                normal_light = max(0, (-dx + dy + dz) / (size * 1.73))
+                lit = 0.8 + 0.2 * normal_light
+                base = (255, 82, 94) if red else (255, 221, 117)
+                specular = 0.8 * normal_light ** 10
+                color = tuple(min(255, int(c * lit + (255 - c) * specular)) for c in base)
+                add(cx + dx, y + dy, cz + dz, rng.choice("oO@*"), color, 0.25)
 
     # A short trunk, mostly visible between the lowest branches and the ground.
     for i in range(200):
@@ -157,7 +160,7 @@ def renderer():
 
         for x, y, z, ch, rgb, shine, phase in points:
             front = -sa * x + ca * z
-            shade = 0.54 + 0.46 * (front / max(0.15, math.hypot(x, z)) + 1) / 2
+            shade = 0.74 + 0.26 * (front / max(0.15, math.hypot(x, z)) + 1) / 2
             shimmer = 1 + shine * (0.5 + 0.5 * math.sin(angle * 3 + phase))
             color = tuple(min(255, int(c * shade * shimmer)) for c in rgb)
             project(x, y, z, ch, color)
@@ -184,12 +187,12 @@ def renderer():
         for iy in range(-5, 6):
             for ix in range(-7, 8):
                 if inside(ix / 7, iy / 5):
-                    project(ix * 0.061, star_y - iy * 0.085, 0.1, "*" if abs(ix) + abs(iy) > 4 else "@", (255, 218 + int(18 * math.sin(angle) ** 2), 102), rotating=False, priority=5)
+                    project(ix * 0.061, star_y - iy * 0.085, 0.1, "*" if abs(ix) + abs(iy) > 4 else "@", (255, 238 + int(17 * math.sin(angle) ** 2), 157), rotating=False, priority=5)
         for i in [-1, 1]:
             for j in range(8, 15):
-                project(i * j * 0.06, star_y, 0.1, "." if j > 11 else "-", (123, 108, 63), rotating=False)
+                project(i * j * 0.06, star_y, 0.1, "." if j > 11 else "-", (202, 177, 98), rotating=False)
             for j in range(6, 10):
-                project(0, star_y + i * j * 0.085, 0.1, ":", (137, 119, 68), rotating=False)
+                project(0, star_y + i * j * 0.085, 0.1, ":", (215, 186, 104), rotating=False)
 
         # All snowflakes travel an integer number of screen heights per loop.
         # Wrapping offscreen makes the last-to-first frame a normal time step.
@@ -206,10 +209,32 @@ def renderer():
         image = Image.new("RGB", (WIDTH, HEIGHT), BACKGROUND)
         for (x, y), (_, char, color) in cells.items():
             image.paste(stamp(char, color), (x * CELL_X, y * CELL_Y))
-        # A restrained bloom preserves the readable characters.
-        glow = image.point(lambda v: max(0, v - 115) * 0.25).filter(ImageFilter.GaussianBlur(3))
+
+        # Brief, staggered glints on visible branch tips and garland beads.
+        # Periodic phases preserve the seamless rotation and snowfall loop.
+        glints = Image.new("RGB", (WIDTH, HEIGHT))
+        pen = ImageDraw.Draw(glints)
+        for (x, y), (depth, char, color) in cells.items():
+            if not (15 < y < 90 and 25 < x < cols - 25 and depth > 0):
+                continue
+            if char not in "+*xo" or (x * 19 + y * 31) % 37:
+                continue
+            phase = ((x * 17 + y * 43) % 101) / 101 * TAU
+            pulse = max(0, math.sin(angle * 3 + phase)) ** 18
+            if pulse < 0.2:
+                continue
+            cx, cy = x * CELL_X + 2, y * CELL_Y + 3
+            glow_color = tuple(int(c * pulse) for c in (255, 248, 201))
+            pen.line((cx - 3, cy, cx + 3, cy), fill=glow_color)
+            pen.line((cx, cy - 4, cx, cy + 4), fill=glow_color)
+
         from PIL import ImageChops
-        return ImageChops.add(image, glow)
+        image = ImageChops.add(image, glints)
+        # Two soft halos make the lights shine while keeping crisp ASCII cores.
+        highlights = image.point(lambda v: max(0, v - 85))
+        glow = highlights.filter(ImageFilter.GaussianBlur(1.5)).point(lambda v: v * 0.95)
+        halo = highlights.filter(ImageFilter.GaussianBlur(4)).point(lambda v: v * 0.65)
+        return ImageChops.add(ImageChops.add(image, glow), halo)
 
     return render
 
